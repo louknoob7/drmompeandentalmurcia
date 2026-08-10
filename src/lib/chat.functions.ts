@@ -44,50 +44,80 @@ export const responderChat = createServerFn({ method: "POST" })
       return { ok: false as const, texto: "" };
     }
 
-    const modelo = process.env["GEMINI_MODEL"] ?? "gemini-flash-latest";
     const ahora = new Date().toLocaleString("es-ES", { timeZone: "Europe/Madrid" });
+    const preferido = process.env["GEMINI_MODEL"];
+    const modelos = [
+      ...(preferido ? [preferido] : []),
+      "gemini-2.5-flash",
+      "gemini-flash-latest",
+      "gemini-2.0-flash",
+    ].filter((m, i, a) => a.indexOf(m) === i);
 
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
-        {
-          method: "POST",
-          headers: {
-            "x-goog-api-key": apiKey,
-            "Content-Type": "application/json",
+    const cuerpo = JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: `${SYSTEM_PROMPT}\n\nFecha y hora actual en Murcia: ${ahora}.` }],
+      },
+      contents: data.mensajes.map((m) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
+      })),
+      generationConfig: {
+        maxOutputTokens: 2400,
+        temperature: 0.7,
+        // Sin "thinking": si el modelo razona, agota los tokens y devuelve texto vacío.
+        thinkingConfig: { thinkingBudget: 0 },
+      },
+    });
+
+    let ultimoStatus = 0;
+    for (const modelo of modelos) {
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
+          {
+            method: "POST",
+            headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
+            body: cuerpo,
           },
-          body: JSON.stringify({
-            systemInstruction: {
-              parts: [
-                { text: `${SYSTEM_PROMPT}\n\nFecha y hora actual en Murcia: ${ahora}.` },
-              ],
-            },
-            contents: data.mensajes.map((m) => ({
-              role: m.role === "assistant" ? "model" : "user",
-              parts: [{ text: m.content }],
-            })),
-            generationConfig: { maxOutputTokens: 2400 },
-          }),
-        },
-      );
+        );
 
-      if (!res.ok) {
-        console.error("Error de la API de Gemini:", res.status, await res.text().catch(() => ""));
-        return { ok: false as const, texto: "", status: res.status };
+        if (!res.ok) {
+          ultimoStatus = res.status;
+          console.error(
+            `Error de la API de Gemini (${modelo}):`,
+            res.status,
+            await res.text().catch(() => ""),
+          );
+          // 400/404 suelen ser modelo no disponible para esta clave: probamos el siguiente.
+          if (res.status === 400 || res.status === 404) continue;
+          return { ok: false as const, texto: "", status: res.status };
+        }
+
+        const json = (await res.json()) as {
+          candidates?: {
+            finishReason?: string;
+            content?: { parts?: { text?: string }[] };
+          }[];
+          promptFeedback?: { blockReason?: string };
+        };
+        const candidato = json.candidates?.[0];
+        const texto = (candidato?.content?.parts ?? [])
+          .map((p) => p.text ?? "")
+          .join("")
+          .trim();
+
+        if (!texto) {
+          console.error(
+            `Respuesta vacía de Gemini (${modelo}). finishReason=${candidato?.finishReason ?? "?"} block=${json.promptFeedback?.blockReason ?? "-"}`,
+          );
+          continue;
+        }
+        return { ok: true as const, texto };
+      } catch (error) {
+        console.error(`Fallo llamando al asistente (${modelo}):`, error);
       }
-
-      const json = (await res.json()) as {
-        candidates?: { content?: { parts?: { text?: string }[] } }[];
-      };
-      const texto = (json.candidates?.[0]?.content?.parts ?? [])
-        .map((p) => p.text ?? "")
-        .join("")
-        .trim();
-      if (!texto) return { ok: false as const, texto: "" };
-      return { ok: true as const, texto };
-    } catch (error) {
-      console.error("Fallo llamando al asistente:", error);
-      return { ok: false as const, texto: "" };
     }
+
+    return { ok: false as const, texto: "", ...(ultimoStatus ? { status: ultimoStatus } : {}) };
   });
 
