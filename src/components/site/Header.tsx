@@ -4,7 +4,7 @@ import { ChevronDown, Menu, Phone, X } from "lucide-react";
 
 import { CLINICA, SERVICIOS } from "@/lib/clinica";
 import { ctaClasses } from "@/components/site/ui";
-import logoMompean from "@/assets/logo-mompean.png.asset.json";
+const logoMompean = { url: "/logo-mompean.png" };
 
 const NAV = [
   { to: "/", label: "Inicio" },

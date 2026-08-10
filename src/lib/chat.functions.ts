@@ -38,37 +38,51 @@ export const responderChat = createServerFn({ method: "POST" })
     z.object({ mensajes: z.array(MensajeSchema).max(40) }).parse(data),
   )
   .handler(async ({ data }) => {
-    const apiKey = process.env["LOVABLE_API_KEY"];
-    if (!apiKey) return { ok: false as const, texto: "" };
+    const apiKey = process.env["GEMINI_API_KEY"];
+    if (!apiKey) {
+      console.error("Falta la variable de entorno GEMINI_API_KEY en el servidor.");
+      return { ok: false as const, texto: "" };
+    }
 
+    const modelo = process.env["GEMINI_MODEL"] ?? "gemini-flash-latest";
     const ahora = new Date().toLocaleString("es-ES", { timeZone: "Europe/Madrid" });
 
     try {
-      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`,
+        {
+          method: "POST",
+          headers: {
+            "x-goog-api-key": apiKey,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            systemInstruction: {
+              parts: [
+                { text: `${SYSTEM_PROMPT}\n\nFecha y hora actual en Murcia: ${ahora}.` },
+              ],
+            },
+            contents: data.mensajes.map((m) => ({
+              role: m.role === "assistant" ? "model" : "user",
+              parts: [{ text: m.content }],
+            })),
+            generationConfig: { maxOutputTokens: 2400 },
+          }),
         },
-        body: JSON.stringify({
-          model: "google/gemini-3.6-flash",
-          max_tokens: 2400,
-          messages: [
-            { role: "system", content: `${SYSTEM_PROMPT}\n\nFecha y hora actual en Murcia: ${ahora}.` },
-            ...data.mensajes,
-          ],
-        }),
-      });
+      );
 
       if (!res.ok) {
-        console.error("Error del gateway de IA:", res.status, await res.text().catch(() => ""));
+        console.error("Error de la API de Gemini:", res.status, await res.text().catch(() => ""));
         return { ok: false as const, texto: "", status: res.status };
       }
 
       const json = (await res.json()) as {
-        choices?: { message?: { content?: string } }[];
+        candidates?: { content?: { parts?: { text?: string }[] } }[];
       };
-      const texto = json.choices?.[0]?.message?.content ?? "";
+      const texto = (json.candidates?.[0]?.content?.parts ?? [])
+        .map((p) => p.text ?? "")
+        .join("")
+        .trim();
       if (!texto) return { ok: false as const, texto: "" };
       return { ok: true as const, texto };
     } catch (error) {
@@ -76,3 +90,4 @@ export const responderChat = createServerFn({ method: "POST" })
       return { ok: false as const, texto: "" };
     }
   });
+

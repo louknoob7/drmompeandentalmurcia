@@ -3,7 +3,7 @@ import { Clock, Instagram, Facebook, MapPin, Phone, Music2 } from "lucide-react"
 
 import { CLINICA, SERVICIOS } from "@/lib/clinica";
 import { MapEmbed, WhatsAppTextButton } from "@/components/site/ui";
-import logoMompean from "@/assets/logo-mompean.png.asset.json";
+const logoMompean = { url: "/logo-mompean.png" };
 
 export function Footer() {
   return (
