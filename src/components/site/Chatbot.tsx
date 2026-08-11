@@ -88,7 +88,11 @@ export function Chatbot() {
       try {
         const respuesta = await enviarChat({ data: { mensajes: historial.slice(-20) } });
         if (!respuesta.ok || !respuesta.texto) {
-          setMensajes([...historial, { role: "assistant", content: ERROR_AMABLE }]);
+          // Temporal: mostramos el error real del servidor para diagnóstico.
+          const detalle = `Error del servidor: ${"status" in respuesta ? respuesta.status : "?"} - ${
+            "error" in respuesta ? respuesta.error : "sin detalle"
+          }`;
+          setMensajes([...historial, { role: "assistant", content: detalle }]);
           if (vozActiva) hablar(ERROR_AMABLE);
           return;
         }
