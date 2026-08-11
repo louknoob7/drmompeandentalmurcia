@@ -41,8 +41,10 @@ export const responderChat = createServerFn({ method: "POST" })
     const apiKey = process.env["GEMINI_API_KEY"];
     if (!apiKey) {
       console.error("Falta la variable de entorno GEMINI_API_KEY en el servidor.");
-      return { ok: false as const, texto: "" };
+      return { ok: false as const, texto: "", status: 0, error: "Falta GEMINI_API_KEY en el servidor." };
     }
+
+    const sanitize = (msg: string) => msg.replaceAll(apiKey, "***");
 
     const ahora = new Date().toLocaleString("es-ES", { timeZone: "Europe/Madrid" });
     const preferido = process.env["GEMINI_MODEL"];
@@ -70,6 +72,7 @@ export const responderChat = createServerFn({ method: "POST" })
     });
 
     let ultimoStatus = 0;
+    let ultimoError = "";
     for (const modelo of modelos) {
       try {
         const res = await fetch(
@@ -83,14 +86,16 @@ export const responderChat = createServerFn({ method: "POST" })
 
         if (!res.ok) {
           ultimoStatus = res.status;
+          const errorBody = await res.text().catch(() => "");
+          ultimoError = sanitize(errorBody || `HTTP ${res.status}`);
           console.error(
             `Error de la API de Gemini (${modelo}):`,
             res.status,
-            await res.text().catch(() => ""),
+            errorBody,
           );
           // 400/404 suelen ser modelo no disponible para esta clave: probamos el siguiente.
           if (res.status === 400 || res.status === 404) continue;
-          return { ok: false as const, texto: "", status: res.status };
+          return { ok: false as const, texto: "", status: res.status, error: ultimoError };
         }
 
         const json = (await res.json()) as {
@@ -107,17 +112,24 @@ export const responderChat = createServerFn({ method: "POST" })
           .trim();
 
         if (!texto) {
-          console.error(
-            `Respuesta vacía de Gemini (${modelo}). finishReason=${candidato?.finishReason ?? "?"} block=${json.promptFeedback?.blockReason ?? "-"}`,
-          );
+          ultimoStatus = 200;
+          ultimoError = `Respuesta vacía. finishReason=${candidato?.finishReason ?? "?"} block=${json.promptFeedback?.blockReason ?? "-"}`;
+          console.error(`Respuesta vacía de Gemini (${modelo}). ${ultimoError}`);
           continue;
         }
         return { ok: true as const, texto };
       } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        ultimoError = sanitize(msg);
         console.error(`Fallo llamando al asistente (${modelo}):`, error);
       }
     }
 
-    return { ok: false as const, texto: "", ...(ultimoStatus ? { status: ultimoStatus } : {}) };
+    return {
+      ok: false as const,
+      texto: "",
+      status: ultimoStatus,
+      error: ultimoError || "No se pudo contactar con Gemini tras varios intentos.",
+    };
   });
 
